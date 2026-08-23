@@ -116,18 +116,23 @@ async def send_ads_hidden_invoker(interaction: discord.Interaction, count: int) 
     message, config = payload
     allowed_mentions = discord.AllowedMentions.none()
 
-    # If the bot is installed in the guild, acknowledge privately and publish
-    # independent bot messages so the channel does not show who ran /ads.
+    # In a guild where the bot is installed, first show a real ephemeral
+    # acknowledgement only to the command user, then publish normal bot messages.
     if guild_channel_available(interaction):
         channel = interaction.channel
         sent = 0
         try:
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.send_message(
+                f"Invio di {count} messaggio/i avviato.",
+                ephemeral=True,
+            )
+
             for index in range(count):
                 await channel.send(message, allowed_mentions=allowed_mentions)
                 sent += 1
                 if index < count - 1 and config["delay_seconds"] > 0:
                     await asyncio.sleep(config["delay_seconds"])
+
             await interaction.followup.send(
                 f"Operazione completata: {sent} messaggio/i inviato/i.",
                 ephemeral=True,
@@ -146,8 +151,6 @@ async def send_ads_hidden_invoker(interaction: discord.Interaction, count: int) 
                 return
 
     # User Install / DM fallback: Discord requires interaction responses here.
-    # These messages stay public where Discord permits them, but Discord may show
-    # interaction attribution because the bot is not a guild member.
     if interaction.response.is_done():
         sent = 0
         try:
@@ -175,7 +178,6 @@ async def send_ads_hidden_invoker(interaction: discord.Interaction, count: int) 
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 async def ad(interaction: discord.Interaction) -> None:
-    # /ad stays a normal public interaction so Discord shows who used it.
     await send_public_interaction(interaction, 1)
 
 
