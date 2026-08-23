@@ -55,50 +55,128 @@ if APPLICATION_ID:
 bot = commands.Bot(**bot_kwargs)
 
 
-async def send_interaction_messages(interaction: discord.Interaction, count: int) -> None:
+async def load_payload(interaction: discord.Interaction):
     try:
-        message = load_message()
-        config = load_config()
+        return load_message(), load_config()
     except (RuntimeError, OSError, json.JSONDecodeError, ValueError) as exc:
         if interaction.response.is_done():
             await interaction.followup.send(f"Errore configurazione: {exc}", ephemeral=True)
         else:
             await interaction.response.send_message(f"Errore configurazione: {exc}", ephemeral=True)
+        return None
+
+
+async def send_public_interaction(interaction: discord.Interaction, count: int) -> None:
+    payload = await load_payload(interaction)
+    if payload is None:
         return
 
+    message, config = payload
     allowed_mentions = discord.AllowedMentions.none()
     sent = 0
+
     try:
-        await interaction.response.send_message(
-            message,
-            allowed_mentions=allowed_mentions,
-        )
+        await interaction.response.send_message(message, allowed_mentions=allowed_mentions)
         sent = 1
 
         for _ in range(1, count):
             if config["delay_seconds"] > 0:
                 await asyncio.sleep(config["delay_seconds"])
-            await interaction.followup.send(
-                message,
-                allowed_mentions=allowed_mentions,
-            )
+            await interaction.followup.send(message, allowed_mentions=allowed_mentions)
             sent += 1
     except discord.HTTPException as exc:
-        logger.exception("Invio tramite interaction interrotto")
+        logger.exception("Invio interaction interrotto")
         try:
             await interaction.followup.send(
                 f"Invio interrotto dopo {sent} messaggi: {exc}",
                 ephemeral=True,
             )
         except discord.HTTPException:
-            logger.exception("Impossibile inviare anche il messaggio di errore")
+            logger.exception("Impossibile inviare il messaggio di errore")
+
+
+def guild_channel_available(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None or interaction.channel is None:
+        return False
+    me = interaction.guild.me
+    if me is None:
+        return False
+    try:
+        permissions = interaction.channel.permissions_for(me)
+    except (AttributeError, TypeError):
+        return False
+    return permissions.view_channel and permissions.send_messages
+
+
+async def send_ads_hidden_invoker(interaction: discord.Interaction, count: int) -> None:
+    payload = await load_payload(interaction)
+    if payload is None:
+        return
+
+    message, config = payload
+    allowed_mentions = discord.AllowedMentions.none()
+
+    # If the bot is installed in the guild, acknowledge privately and publish
+    # independent bot messages so the channel does not show who ran /ads.
+    if guild_channel_available(interaction):
+        channel = interaction.channel
+        sent = 0
+        try:
+            await interaction.response.defer(ephemeral=True)
+            for index in range(count):
+                await channel.send(message, allowed_mentions=allowed_mentions)
+                sent += 1
+                if index < count - 1 and config["delay_seconds"] > 0:
+                    await asyncio.sleep(config["delay_seconds"])
+            await interaction.followup.send(
+                f"Operazione completata: {sent} messaggio/i inviato/i.",
+                ephemeral=True,
+            )
+            return
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            logger.warning("Invio separato /ads non disponibile: %s", exc)
+            if sent > 0:
+                try:
+                    await interaction.followup.send(
+                        f"Invio interrotto dopo {sent} messaggi: {exc}",
+                        ephemeral=True,
+                    )
+                except discord.HTTPException:
+                    pass
+                return
+
+    # User Install / DM fallback: Discord requires interaction responses here.
+    # These messages stay public where Discord permits them, but Discord may show
+    # interaction attribution because the bot is not a guild member.
+    if interaction.response.is_done():
+        sent = 0
+        try:
+            await interaction.followup.send(message, allowed_mentions=allowed_mentions)
+            sent = 1
+            for _ in range(1, count):
+                if config["delay_seconds"] > 0:
+                    await asyncio.sleep(config["delay_seconds"])
+                await interaction.followup.send(message, allowed_mentions=allowed_mentions)
+                sent += 1
+        except discord.HTTPException as exc:
+            logger.exception("Fallback /ads interrotto")
+            try:
+                await interaction.followup.send(
+                    f"Invio interrotto dopo {sent} messaggi: {exc}",
+                    ephemeral=True,
+                )
+            except discord.HTTPException:
+                pass
+    else:
+        await send_public_interaction(interaction, count)
 
 
 @bot.tree.command(name="ad", description="Invia una volta il testo configurato")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 async def ad(interaction: discord.Interaction) -> None:
-    await send_interaction_messages(interaction, 1)
+    # /ad stays a normal public interaction so Discord shows who used it.
+    await send_public_interaction(interaction, 1)
 
 
 @bot.tree.command(name="ads", description="Invia più volte il testo configurato")
@@ -108,12 +186,9 @@ async def ads(interaction: discord.Interaction) -> None:
     try:
         config = load_config()
     except (RuntimeError, OSError, json.JSONDecodeError, ValueError) as exc:
-        await interaction.response.send_message(
-            f"Errore configurazione: {exc}",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"Errore configurazione: {exc}", ephemeral=True)
         return
-    await send_interaction_messages(interaction, config["ads_count"])
+    await send_ads_hidden_invoker(interaction, config["ads_count"])
 
 
 @bot.event
