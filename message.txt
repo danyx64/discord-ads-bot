@@ -1,0 +1,2 @@
+Questo è il messaggio inviato dal bot.
+Modifica questo file persistente su ZimaOS per cambiare il testo.
