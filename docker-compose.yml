@@ -1,0 +1,34 @@
+name: discord-ads-bot
+
+services:
+  discord-ads-bot:
+    image: ghcr.io/danyx64/discord-ads-bot:latest
+    container_name: discord-ads-bot
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
+      DEV_GUILD_ID: ${DEV_GUILD_ID:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATA_DIR: /data
+    volumes:
+      - /DATA/AppData/discord-ads-bot:/data
+    security_opt:
+      - no-new-privileges:true
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: discord-ads-bot
+  author: DanyX64
+  category: Utilities
+  title:
+    en_us: Discord Ads Bot
+  description:
+    en_us: Discord slash-command bot with configurable /ad and /ads commands.
+  tagline:
+    en_us: Configurable Discord slash-command sender for ZimaOS.
+  developer: DanyX64
+  project_url: https://github.com/danyx64/discord-ads-bot
+  index: /
